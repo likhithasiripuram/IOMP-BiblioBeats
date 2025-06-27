@@ -1,26 +1,20 @@
 from sqlalchemy import create_engine, MetaData, Table, select, text
 import ollama
+from fastapi.responses import RedirectResponse
+from models import Playlist
 
-def get_book_recommendations():
-    # Connect to SQLite database
-    engine = create_engine('sqlite:///test.db')
-    metadata = MetaData()
-    tracks_table = Table('track_table', metadata, autoload_with=engine)
+def get_book_recommendations(playlist_id, db):
+    # fetching selected playlist
+    playlist = db.query(Playlist).filter(Playlist.playlist_id == playlist_id).first()
+    if not playlist or not playlist.tracks:
+        return "No tracks found for this playlist.", None
 
-    # Query 5 random tracks (name + album only)
-    with engine.connect() as conn:
-        stmt = (
-            select(tracks_table.c.track_name, tracks_table.c.album_name)
-            .order_by(text("RANDOM()"))
-            .limit(5)
-        )
-        result = conn.execute(stmt)
-        tracks = result.fetchall()
+    # track list for the prompt
+    track_list = "\n".join(
+        [f"{i+1}. {track.track_name} from album '{track.album_name}'" for i, track in enumerate(playlist.tracks)]
+    )
 
-    # Format the 5 random tracks into a prompt string
-    track_list = "\n".join([f"{i+1}. {row.track_name} from album '{row.album_name}'" for i, row in enumerate(tracks)])
-
-    prompt = f"""Here are 5 randomly selected music tracks and their album names:
+    prompt = f"""Here are the music tracks and their album names from the selected playlist:
 
 {track_list}
 
@@ -31,4 +25,4 @@ Suggest 5 book recommendations on the basis of these tracks."""
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response['message']['content']
+    return response['message']['content'], playlist.playlist_name

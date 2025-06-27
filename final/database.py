@@ -18,7 +18,6 @@ def get_db():
     finally:
         db.close()
 
-# Import models here to ensure they are registered before create_all
-import models  # <-- add this line
+import models  
 
-Base.metadata.create_all(bind=engine)  # <-- keep this after the import
+Base.metadata.create_all(bind=engine)

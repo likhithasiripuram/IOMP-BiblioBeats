@@ -14,14 +14,12 @@ from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Response, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from recommend import get_book_recommendations  # Add this import at the top
+from recommend import get_book_recommendations 
+from datetime import datetime, timedelta
 
-app = FastAPI() #instantiation of FastAPI
+app = FastAPI() 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="./templates") # To render the html template, instantiation
-
-#dependency
-db = get_db()
+templates = Jinja2Templates(directory="./templates") 
 
 STATE_KEY = "spotify_auth_state"
 CLIENT_ID =  "72daf50002ac4c54a83c6a59dda0e359"
@@ -54,6 +52,7 @@ def read_root(response: Response):
         "scope": scope,
         "redirect_uri": REDIRECT_URI,
         "state": state,
+        "show_dialog": "true",
     }
     response = RedirectResponse(
         url="https://accounts.spotify.com/authorize?" + urlencode(params)
@@ -92,9 +91,10 @@ def callback(request: Request, response: Response, db:Session = Depends(get_db))
             user = store_spotify_user_data(user_data, db)
             if not user:
                 raise HTTPException(status_code=400, detail="User not found")
-            
+
+
             user_playlists = get_user_playlists(access_token)
-            store_user_playlists_data(user_playlists, db, user.id)
+            store_user_playlists_data(user_playlists, db, user.id, access_token)
 
             all_playlists = db.query(Playlist).all()
             for x in all_playlists:
@@ -103,13 +103,12 @@ def callback(request: Request, response: Response, db:Session = Depends(get_db))
                 store_tracks_for_playlist(track_data,db,spotify_playlist_id)
 
 
-            categories = get_categories(access_token)
+            db.commit()
 
-            response = RedirectResponse(url="/recommend")
+            response = RedirectResponse(url="/playlists")
             response.set_cookie(key="accessToken", value=access_token)
-
-
-        return response
+            response.set_cookie(key="user_email", value=user_data["email"])
+            return response
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
@@ -117,7 +116,6 @@ def callback(request: Request, response: Response, db:Session = Depends(get_db))
 
 @app.get("/", response_class=HTMLResponse)
 def main(request: Request):
-
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/refresh_token")
@@ -148,9 +146,26 @@ def blank(request: Request):
     return templates.TemplateResponse("blank.html", {"request": request})
 
 @app.get("/recommend", response_class=HTMLResponse)
-def recommend(request: Request):
-    recommendations = get_book_recommendations()
-    return templates.TemplateResponse("blank.html", {"request": request, "recommendations": recommendations})
+async def recommend(request: Request, playlist_id: str, db: Session = Depends(get_db)):
+    recommendations, playlist_name = get_book_recommendations(playlist_id, db)
+    return templates.TemplateResponse(
+        "blank.html",
+        {
+            "request": request,
+            "recommendations": recommendations,
+            "playlist_name": playlist_name
+        }
+    )
+
+@app.get("/playlists", response_class=HTMLResponse)
+def show_playlists(request: Request, db: Session = Depends(get_db)):
+    user_email = request.cookies.get("user_email")
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        return RedirectResponse(url="/login")
+    # Only fetch playlists for this user
+    playlists = db.query(Playlist).filter(Playlist.user_id == user.id).all()
+    return templates.TemplateResponse("playlists.html", {"request": request, "playlists": playlists})
 
 def get_spotify_user_data(access_token: str):
     """Fetches Spotify user profile data."""
@@ -180,10 +195,12 @@ def get_user_playlists(access_token: str):
         raise HTTPException(status_code=400, detail="Failed to fetch playlists from Spotify")
 
 def get_playlist_tracks(access_token: str, playlist_id: str):
-
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
     headers = {"Authorization": f"Bearer {access_token}"}
+    print("Fetching tracks for playlist:", playlist_id)  
     response = requests.get(url, headers=headers)
+    print("Spotify API status:", response.status_code)   
+    print("Spotify API response:", response.text)         
 
     if response.status_code == 200:
         return response.json()
@@ -210,6 +227,8 @@ def get_categories(access_token: str):
 
     if response.status_code == 200:
         return response.json()
+    
     else:
         raise HTTPException(status_code=400, detail="Failed to fetch categories")
+
 

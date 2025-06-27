@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Select Playlist</title>
+    <link rel="stylesheet" href="/static/playlists.css">
+    <style>
+        body {
+            background: url('/static/musicbg.png') repeat;
+            background-size: auto;
+        }
+    </style>
+</head>
+<body>
+    <h2>Select a Playlist</h2>
+    <ul class="playlist-list">
+        {% for playlist in playlists %}
+        <li>
+            <form action="/recommend" method="get" style="display:inline;">
+                <input type="hidden" name="playlist_id" value="{{ playlist.playlist_id }}">
+                <button type="submit">{{ playlist.playlist_name }}</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
